@@ -1,152 +1,138 @@
-<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
-<html>
-<head>
-  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-  <meta http-equiv="Content-Style-Type" content="text/css">
-  <title></title>
-  <meta name="Generator" content="Cocoa HTML Writer">
-  <meta name="CocoaVersion" content="2575.4">
-  <style type="text/css">
-    p.p1 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Times; -webkit-text-stroke: #000000}
-    p.p2 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Times; -webkit-text-stroke: #000000; min-height: 14.0px}
-    span.s1 {font-kerning: none}
-  </style>
-</head>
-<body>
-<p class="p1"><span class="s1">import os</span></p>
-<p class="p1"><span class="s1">import logging</span></p>
-<p class="p1"><span class="s1">import requests</span></p>
-<p class="p1"><span class="s1">from flask import Flask, redirect, request, render_template, jsonify, session</span></p>
-<p class="p1"><span class="s1">from dotenv import load_dotenv</span></p>
-<p class="p1"><span class="s1">import openai</span></p>
-<p class="p1"><span class="s1">from urllib.parse import quote</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"># Завантаження змінних середовища</span></p>
-<p class="p1"><span class="s1">load_dotenv()</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"># Налаштування логування</span></p>
-<p class="p1"><span class="s1">logging.basicConfig(level=logging.INFO)</span></p>
-<p class="p1"><span class="s1">logger = logging.getLogger(__name__)</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"># Ініціалізація Flask додатку</span></p>
-<p class="p1"><span class="s1">app = Flask(__name__)</span></p>
-<p class="p1"><span class="s1">app.secret_key = os.getenv('SECRET_KEY', os.urandom(24))</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"># Клас конфігурації</span></p>
-<p class="p1"><span class="s1">class Config:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>CLIENT_ID = os.getenv('CLIENT_ID')</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>CLIENT_SECRET = os.getenv('CLIENT_SECRET')</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>REDIRECT_URI = os.getenv('REDIRECT_URI', 'http://127.0.0.1:5000/callback')</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>AUTH_URL = 'https://www.linkedin.com/oauth/v2/authorization'</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>TOKEN_URL = 'https://www.linkedin.com/oauth/v2/accessToken'</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>PROFILE_URL = 'https://api.linkedin.com/v2/me'</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>SCOPES = 'r_liteprofile'</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1">config = Config()</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"># Перевірка необхідних змінних</span></p>
-<p class="p1"><span class="s1">required_vars = ['CLIENT_ID', 'CLIENT_SECRET', 'OPENAI_API_KEY']</span></p>
-<p class="p1"><span class="s1">missing_vars = [var for var in required_vars if not getattr(config, var)]</span></p>
-<p class="p1"><span class="s1">if missing_vars:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>raise ValueError(f"Відсутні змінні середовища: {', '.join(missing_vars)}")</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1">openai.api_key = config.OPENAI_API_KEY</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1">@app.route('/')</span></p>
-<p class="p1"><span class="s1">def index():</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>return render_template('index.html')</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1">@app.route('/login')</span></p>
-<p class="p1"><span class="s1">def login():</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>try:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>state = os.urandom(16).hex()</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>session['oauth_state'] = state<span class="Apple-converted-space">  </span># Захист від CSRF</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>params = {</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'response_type': 'code',</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'client_id': config.CLIENT_ID,</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'redirect_uri': config.REDIRECT_URI,</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'scope': config.SCOPES,</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'state': state</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>}</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>auth_url = f"{config.AUTH_URL}?{'&amp;'.join(f'{k}={quote(v)}' for k, v in params.items())}"</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>return redirect(auth_url)</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>except Exception as e:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>logger.error(f'Помилка авторизації: {e}')</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>return jsonify({'error': 'Authorization failed'}), 500</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1">@app.route('/callback')</span></p>
-<p class="p1"><span class="s1">def callback():</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>try:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>code = request.args.get('code')</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>state = request.args.get('state')</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>error = request.args.get('error')</span></p>
-<p class="p2"><span class="s1"><span class="Apple-converted-space">        </span></span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>if error:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>return jsonify({'error': error, 'description': request.args.get('error_description')}), 400</span></p>
-<p class="p2"><span class="s1"><span class="Apple-converted-space">        </span></span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>if not code or state != session.get('oauth_state'):</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>return jsonify({'error': 'Invalid authorization request'}), 400</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>access_token = get_access_token(code)</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>if not access_token:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>return jsonify({'error': 'Failed to obtain access token'}), 500</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>profile_data = get_user_profile(access_token)</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>if not profile_data:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>return jsonify({'error': 'Failed to fetch profile data'}), 500</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>session['access_token'] = access_token</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>session['profile_data'] = profile_data</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>return render_template('profile.html', profile=profile_data)</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>except Exception as e:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>logger.error(f'Callback error: {e}')</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>return jsonify({'error': 'Callback processing failed'}), 500</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1">def get_access_token(code):</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>try:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>data = {</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'grant_type': 'authorization_code',</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'code': code,</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'redirect_uri': config.REDIRECT_URI,</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'client_id': config.CLIENT_ID,</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'client_secret': config.CLIENT_SECRET,</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>}</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>response = requests.post(</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>config.TOKEN_URL,</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>data=data,</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>headers={'Content-Type': 'application/x-www-form-urlencoded'},</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>timeout=10</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>)</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>response.raise_for_status()</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>return response.json().get('access_token')</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>except requests.exceptions.RequestException as e:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>logger.error(f'Error fetching access token: {e}')</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>return None</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1">def get_user_profile(access_token):</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>try:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>headers = {</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'Authorization': f'Bearer {access_token}',</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'Connection': 'Keep-Alive'</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>}</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>response = requests.get(config.PROFILE_URL, headers=headers, timeout=10)</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>response.raise_for_status()</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>return response.json()</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>except requests.exceptions.RequestException as e:</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>logger.error(f'Error fetching profile: {e}')</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>return None</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1">@app.errorhandler(404)</span></p>
-<p class="p1"><span class="s1">def page_not_found(e):</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>return jsonify({'error': 'Page not found'}), 404</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1">@app.errorhandler(500)</span></p>
-<p class="p1"><span class="s1">def internal_server_error(e):</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>return jsonify({'error': 'Internal server error'}), 500</span></p>
-<p class="p2"><span class="s1"></span><br></p>
-<p class="p1"><span class="s1">if __name__ == '__main__':</span></p>
-<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>app.run(debug=True, host='127.0.0.1', port=5000, threaded=True)</span></p>
-</body>
-</html>
+import os
+import logging
+import requests
+from flask import Flask, redirect, request, render_template, jsonify, session, url_for
+from dotenv import load_dotenv
+import openai
+from urllib.parse import quote
+
+# Завантаження змінних середовища
+load_dotenv()
+
+# Налаштування логування
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Ініціалізація Flask додатку
+app = Flask(__name__)
+app.secret_key = os.getenv('SECRET_KEY', os.urandom(24))
+
+# Конфігурація
+class Config:
+    CLIENT_ID = os.getenv('CLIENT_ID')
+    CLIENT_SECRET = os.getenv('CLIENT_SECRET')
+    REDIRECT_URI = os.getenv('REDIRECT_URI', 'http://127.0.0.1:5000/callback')
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    AUTH_URL = 'https://www.linkedin.com/oauth/v2/authorization'
+    TOKEN_URL = 'https://www.linkedin.com/oauth/v2/accessToken'
+    PROFILE_URL = 'https://api.linkedin.com/v2/me'
+    SCOPES = 'r_liteprofile'
+
+config = Config()
+
+# Перевірка змінних середовища
+required_vars = ['CLIENT_ID', 'CLIENT_SECRET', 'OPENAI_API_KEY']
+missing_vars = [var for var in required_vars if not getattr(config, var)]
+if missing_vars:
+    raise ValueError(f"Відсутні змінні середовища: {', '.join(missing_vars)}")
+
+openai.api_key = config.OPENAI_API_KEY
+
+# Маршрути
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/login')
+def login():
+    try:
+        state = os.urandom(16).hex()
+        session['oauth_state'] = state
+        params = {
+            'response_type': 'code',
+            'client_id': config.CLIENT_ID,
+            'redirect_uri': config.REDIRECT_URI,
+            'scope': config.SCOPES,
+            'state': state
+        }
+        auth_url = f"{config.AUTH_URL}?{'&'.join(f'{k}={quote(v)}' for k, v in params.items())}"
+        return redirect(auth_url)
+    except Exception as e:
+        logger.error(f'Помилка авторизації: {e}')
+        return jsonify({'error': 'Authorization failed'}), 500
+
+@app.route('/callback')
+def callback():
+    try:
+        code = request.args.get('code')
+        state = request.args.get('state')
+        error = request.args.get('error')
+        
+        if error:
+            return jsonify({'error': error, 'description': request.args.get('error_description')}), 400
+        
+        if not code or state != session.get('oauth_state'):
+            return jsonify({'error': 'Invalid authorization request'}), 400
+
+        access_token = get_access_token(code)
+        if not access_token:
+            return jsonify({'error': 'Failed to obtain access token'}), 500
+
+        profile_data = get_user_profile(access_token)
+        if not profile_data:
+            return jsonify({'error': 'Failed to fetch profile data'}), 500
+
+        session['access_token'] = access_token
+        session['profile_data'] = profile_data
+
+        return render_template('profile.html', profile=profile_data)
+    except Exception as e:
+        logger.error(f'Callback error: {e}')
+        return jsonify({'error': 'Callback processing failed'}), 500
+
+# Допоміжні функції
+def get_access_token(code):
+    try:
+        data = {
+            'grant_type': 'authorization_code',
+            'code': code,
+            'redirect_uri': config.REDIRECT_URI,
+            'client_id': config.CLIENT_ID,
+            'client_secret': config.CLIENT_SECRET,
+        }
+        response = requests.post(
+            config.TOKEN_URL,
+            data=data,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json().get('access_token')
+    except requests.exceptions.RequestException as e:
+        logger.error(f'Error fetching access token: {e}')
+        return None
+
+def get_user_profile(access_token):
+    try:
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Connection': 'Keep-Alive'
+        }
+        response = requests.get(config.PROFILE_URL, headers=headers, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f'Error fetching profile: {e}')
+        return None
+
+# Обробники помилок
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template('404.html'), 404
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    return render_template('500.html'), 500
+
+if __name__ == '__main__':
+    app.run(debug=True, host='127.0.0.1', port=5000, threaded=True)
