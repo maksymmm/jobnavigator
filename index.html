@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Ініціалізація Flask додатку
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', os.urandom(24))
+app.secret_key = os.getenv('SECRET_KEY', os.urandom(24).hex())  # Hex для безпечного ключа
 
 # Конфігурація
 class Config:
@@ -34,6 +34,7 @@ config = Config()
 required_vars = ['CLIENT_ID', 'CLIENT_SECRET', 'OPENAI_API_KEY']
 missing_vars = [var for var in required_vars if not getattr(config, var)]
 if missing_vars:
+    logger.error(f"Відсутні змінні середовища: {', '.join(missing_vars)}")
     raise ValueError(f"Відсутні змінні середовища: {', '.join(missing_vars)}")
 
 openai.api_key = config.OPENAI_API_KEY
@@ -41,7 +42,11 @@ openai.api_key = config.OPENAI_API_KEY
 # Маршрути
 @app.route('/')
 def index():
-    return render_template('index.html')
+    try:
+        return render_template('index.html')
+    except Exception as e:
+        logger.error(f'Помилка рендерингу index.html: {e}')
+        return jsonify({'error': 'Не вдалося знайти шаблон index.html'}), 500
 
 @app.route('/login')
 def login():
@@ -55,11 +60,12 @@ def login():
             'scope': config.SCOPES,
             'state': state
         }
-        auth_url = f"{config.AUTH_URL}?{'&'.join(f'{k}={quote(v)}' for k, v in params.items())}"
+        auth_url = f"{config.AUTH_URL}?{'&'.join(f'{k}={quote(str(v))}' for k, v in params.items())}"
+        logger.info(f'Перенаправлення на: {auth_url}')
         return redirect(auth_url)
     except Exception as e:
         logger.error(f'Помилка авторизації: {e}')
-        return jsonify({'error': 'Authorization failed'}), 500
+        return jsonify({'error': 'Помилка авторизації'}), 500
 
 @app.route('/callback')
 def callback():
@@ -69,26 +75,31 @@ def callback():
         error = request.args.get('error')
         
         if error:
+            logger.error(f'Помилка LinkedIn: {error}, {request.args.get("error_description")}')
             return jsonify({'error': error, 'description': request.args.get('error_description')}), 400
         
         if not code or state != session.get('oauth_state'):
-            return jsonify({'error': 'Invalid authorization request'}), 400
+            logger.error('Недійсний запит авторизації: код або state не збігаються')
+            return jsonify({'error': 'Недійсний запит авторизації'}), 400
 
         access_token = get_access_token(code)
         if not access_token:
-            return jsonify({'error': 'Failed to obtain access token'}), 500
+            logger.error('Не вдалося отримати access token')
+            return jsonify({'error': 'Не вдалося отримати токен доступу'}), 500
 
         profile_data = get_user_profile(access_token)
         if not profile_data:
-            return jsonify({'error': 'Failed to fetch profile data'}), 500
+            logger.error('Не вдалося отримати дані профілю')
+            return jsonify({'error': 'Не вдалося отримати профіль користувача'}), 500
 
         session['access_token'] = access_token
         session['profile_data'] = profile_data
+        logger.info(f'Профіль отримано: {profile_data}')
 
         return render_template('profile.html', profile=profile_data)
     except Exception as e:
-        logger.error(f'Callback error: {e}')
-        return jsonify({'error': 'Callback processing failed'}), 500
+        logger.error(f'Помилка в callback: {e}')
+        return jsonify({'error': 'Помилка обробки callback'}), 500
 
 # Допоміжні функції
 def get_access_token(code):
@@ -107,9 +118,11 @@ def get_access_token(code):
             timeout=10
         )
         response.raise_for_status()
-        return response.json().get('access_token')
+        token = response.json().get('access_token')
+        logger.info(f'Access token отримано: {token[:10]}...')
+        return token
     except requests.exceptions.RequestException as e:
-        logger.error(f'Error fetching access token: {e}')
+        logger.error(f'Помилка отримання access token: {e}')
         return None
 
 def get_user_profile(access_token):
@@ -122,17 +135,23 @@ def get_user_profile(access_token):
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        logger.error(f'Error fetching profile: {e}')
+        logger.error(f'Помилка отримання профілю: {e}')
         return None
 
 # Обробники помилок
 @app.errorhandler(404)
 def page_not_found(e):
-    return render_template('404.html'), 404
+    try:
+        return render_template('404.html'), 404
+    except Exception:
+        return jsonify({'error': 'Сторінку не знайдено'}), 404
 
 @app.errorhandler(500)
 def internal_server_error(e):
-    return render_template('500.html'), 500
+    try:
+        return render_template('500.html'), 500
+    except Exception:
+        return jsonify({'error': 'Внутрішня помилка сервера'}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='127.0.0.1', port=5000, threaded=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
